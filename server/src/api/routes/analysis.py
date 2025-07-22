@@ -1,9 +1,6 @@
-from flask import Blueprint, Response, stream_with_context, request, jsonify
-import json
-import sys
+from flask import Blueprint, request, jsonify
 import os
 from datetime import datetime
-import time
 from src.controllers.analysis_controller import AnalysisController
 from src.services.gmail_service import GmailService
 from src.models.dto.requests import EmailRequestDTO
