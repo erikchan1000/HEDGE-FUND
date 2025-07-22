@@ -59,4 +59,41 @@ class AnalysisRequestDTO:
         if self.portfolio:
             result['portfolio'] = self.portfolio.to_dict()
         
-        return result 
+        return result
+
+@dataclass
+class EmailRequestDTO:
+    """Data Transfer Object for email requests."""
+    
+    to: str
+    subject: str
+    body: str
+    html_body: Optional[str] = None
+    attachments: Optional[List[str]] = None
+    
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'EmailRequestDTO':
+        """Create DTO from dictionary data."""
+        return cls(
+            to=data.get('to'),
+            subject=data.get('subject'),
+            body=data.get('body'),
+            html_body=data.get('html_body'),
+            attachments=data.get('attachments')
+        )
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert DTO to dictionary."""
+        result = {
+            'to': self.to,
+            'subject': self.subject,
+            'body': self.body
+        }
+        
+        if self.html_body is not None:
+            result['html_body'] = self.html_body
+        if self.attachments is not None:
+            result['attachments'] = self.attachments
+        
+        return result
+ 

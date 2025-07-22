@@ -86,4 +86,34 @@ class ErrorResponseDTO:
         if self.stage is not None:
             result['stage'] = self.stage
         
-        return result 
+        return result
+
+@dataclass
+class EmailResponseDTO:
+    """Data Transfer Object for email responses."""
+    
+    success: bool
+    message_id: Optional[str] = None
+    error: Optional[str] = None
+    status_code: Optional[int] = None
+    timestamp: Optional[str] = None
+    
+    def __post_init__(self):
+        if self.timestamp is None:
+            self.timestamp = datetime.now().isoformat()
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert DTO to dictionary."""
+        result = {
+            'success': self.success,
+            'timestamp': self.timestamp
+        }
+        
+        if self.message_id is not None:
+            result['message_id'] = self.message_id
+        if self.error is not None:
+            result['error'] = self.error
+        if self.status_code is not None:
+            result['status_code'] = self.status_code
+        
+        return result
