@@ -110,32 +110,96 @@ def get_financial_metrics(
         result = []
         market_cap = profile.get("marketCapitalization")
         
-        # Process each financial period
-        for data in financial_data_list[:limit]:
+        # Build quarterly series for proper TTM calculations
+        quarterly = [d for d in financial_data_list if isinstance(getattr(d, 'fiscal_period', ''), str) and getattr(d, 'fiscal_period', '').upper().startswith('Q')]
+        # Helper to build a numeric series
+        def _series(values: list[Optional[float]]) -> list[float]:
+            return [float(v) for v in values if v is not None]
+
+        q_rev = [d.revenues for d in quarterly]
+        q_ni = [d.net_income for d in quarterly]
+        # Prefer provided FCF, else compute OCF - CapEx
+        q_fcf = []
+        for d in quarterly:
+            if getattr(d, 'free_cash_flow', None) is not None:
+                q_fcf.append(d.free_cash_flow)
+            else:
+                ocf = getattr(d, 'operating_cash_flow', None)
+                capex = getattr(d, 'capital_expenditure', None)
+                q_fcf.append((ocf - capex) if (ocf is not None and capex is not None) else None)
+        q_equity = [d.total_equity for d in quarterly]
+
+        def ttm_sum(series: list[Optional[float]], start: int = 0) -> Optional[float]:
+            window = series[start:start+4]
+            if len(window) < 4 or any(v is None for v in window):
+                return None
+            return float(sum(v for v in window if v is not None))
+
+        ttm_revenue = ttm_sum(q_rev, 0)
+        ttm_prev_revenue = ttm_sum(q_rev, 4)
+        ttm_net_income = ttm_sum(q_ni, 0)
+        ttm_prev_net_income = ttm_sum(q_ni, 4)
+        ttm_fcf = ttm_sum(q_fcf, 0)
+        equity_now = q_equity[0] if len(q_equity) > 0 else None
+        equity_prev = q_equity[4] if len(q_equity) > 4 else None
+
+        # Process only the most recent TTM snapshot for agents
+        for idx, data in enumerate(financial_data_list[:1]):
             # Calculate all financial metrics
             calculated_metrics = adapter.calculate_financial_metrics(data, market_cap)
-            
+
             # Determine report period
             report_period = data.period or end_date
-            
+
+            # Compute YoY growth rates using TTM windows
+            revenue_growth = None
+            earnings_growth = None
+            book_value_growth = None
+            if ttm_revenue is not None and ttm_prev_revenue is not None and ttm_prev_revenue != 0:
+                revenue_growth = (ttm_revenue - ttm_prev_revenue) / abs(ttm_prev_revenue)
+            if ttm_net_income is not None and ttm_prev_net_income is not None and ttm_prev_net_income != 0:
+                earnings_growth = (ttm_net_income - ttm_prev_net_income) / abs(ttm_prev_net_income)
+            if equity_now is not None and equity_prev is not None and equity_prev != 0:
+                book_value_growth = (equity_now - equity_prev) / abs(equity_prev)
+
+            # Compute basic valuation ratios using market cap if available
+            pe_ratio = None
+            pb_ratio = None
+            ps_ratio = None
+            fcf_yield = None
+            try:
+                if market_cap:
+                    # Use proper TTM values where applicable
+                    if ttm_net_income and ttm_net_income > 0:
+                        pe_ratio = market_cap / ttm_net_income
+                    if equity_now and equity_now > 0:
+                        pb_ratio = market_cap / equity_now
+                    if ttm_revenue and ttm_revenue > 0:
+                        ps_ratio = market_cap / ttm_revenue
+                    if ttm_fcf and ttm_fcf > 0:
+                        fcf_yield = ttm_fcf / market_cap
+            except Exception:
+                # Keep ratios None on any unexpected calculation errors
+                pass
+
             # Create FinancialMetrics object
             metrics = FinancialMetrics(
                 ticker=ticker,
                 report_period=report_period,
                 period=period,
                 currency=profile.get("currency", "USD"),
-                
+
                 # Market & Valuation
                 market_cap=calculated_metrics.get("market_cap"),
                 enterprise_value=None,  # Not calculated in basic adapter
-                price_to_earnings_ratio=None,  # Requires stock price
-                price_to_book_ratio=None,  # Requires stock price  
-                price_to_sales_ratio=None,  # Requires stock price
+                price_to_earnings_ratio=pe_ratio,
+                price_to_book_ratio=pb_ratio,
+                price_to_sales_ratio=ps_ratio,
                 enterprise_value_to_ebitda_ratio=None,  # Requires enterprise value
                 enterprise_value_to_revenue_ratio=None,  # Requires enterprise value
-                free_cash_flow_yield=None,  # Requires market cap and FCF
-                peg_ratio=None,  # Requires P/E and growth rate
-                
+                free_cash_flow_yield=fcf_yield,
+                peg_ratio=None,  # Could be added using earnings_growth
+
                 # Profitability & Margins
                 gross_margin=calculated_metrics.get("gross_margin"),
                 operating_margin=calculated_metrics.get("operating_margin"),
@@ -143,7 +207,7 @@ def get_financial_metrics(
                 return_on_equity=calculated_metrics.get("return_on_equity"),
                 return_on_assets=calculated_metrics.get("return_on_assets"),
                 return_on_invested_capital=None,  # Requires ROIC calculation
-                
+
                 # Activity & Efficiency
                 asset_turnover=calculated_metrics.get("asset_turnover"),
                 inventory_turnover=calculated_metrics.get("inventory_turnover"),
@@ -151,35 +215,37 @@ def get_financial_metrics(
                 days_sales_outstanding=calculated_metrics.get("days_sales_outstanding"),
                 operating_cycle=None,  # Could be calculated
                 working_capital_turnover=None,  # Could be calculated
-                
+
                 # Liquidity
                 current_ratio=calculated_metrics.get("current_ratio"),
                 quick_ratio=None,  # Requires quick assets calculation
                 cash_ratio=None,  # Could be calculated
                 operating_cash_flow_ratio=calculated_metrics.get("operating_cash_flow_ratio"),
-                
+
                 # Leverage
                 debt_to_equity=calculated_metrics.get("debt_to_equity"),
                 debt_to_assets=calculated_metrics.get("debt_to_assets"),
                 interest_coverage=None,  # Requires EBIT/Interest calculation
-                
-                # Growth - Not available from single period data
-                revenue_growth=None,
-                earnings_growth=None,
-                book_value_growth=None,
+
+                # Growth (TTM YoY)
+                revenue_growth=revenue_growth,
+                earnings_growth=earnings_growth,
+                book_value_growth=book_value_growth,
                 earnings_per_share_growth=None,
                 free_cash_flow_growth=None,
                 operating_income_growth=None,
                 ebitda_growth=None,
-                
+
                 # Per Share
-                earnings_per_share=calculated_metrics.get("earnings_per_share"),
+                earnings_per_share=(ttm_net_income / profile.get("shareOutstanding")) if (ttm_net_income and profile.get("shareOutstanding")) else calculated_metrics.get("earnings_per_share"),
                 book_value_per_share=calculated_metrics.get("book_value_per_share"),
-                free_cash_flow_per_share=calculated_metrics.get("free_cash_flow_per_share"),
+                free_cash_flow_per_share=(ttm_fcf / profile.get("shareOutstanding")) if (ttm_fcf and profile.get("shareOutstanding")) else calculated_metrics.get("free_cash_flow_per_share"),
                 payout_ratio=None  # Requires dividends data
             )
-            
+
             result.append(metrics)
+            # Only the latest TTM snapshot is needed
+            break
         
         # Cache and return results
         _cache.set_financial_metrics(ticker, [m.model_dump() for m in result])
