@@ -604,6 +604,9 @@ class PolygonFinancialData:
     investing_cash_flow: Optional[float] = None
     financing_cash_flow: Optional[float] = None
     net_cash_flow: Optional[float] = None
+    capital_expenditure: Optional[float] = None
+    free_cash_flow: Optional[float] = None
+    depreciation_and_amortization: Optional[float] = None
     
     # Period information
     period: Optional[str] = None
@@ -702,6 +705,15 @@ class PolygonFinancialAdapter:
             data.investing_cash_flow = self._get_value(cash_flow, 'net_cash_flow_from_investing_activities')
             data.financing_cash_flow = self._get_value(cash_flow, 'net_cash_flow_from_financing_activities')
             data.net_cash_flow = self._get_value(cash_flow, 'net_cash_flow')
+            # Actual CapEx and FCF when available
+            data.capital_expenditure = self._get_value(cash_flow, 'payments_to_acquire_property_plant_and_equipment')
+            data.free_cash_flow = self._get_value(cash_flow, 'free_cash_flow')
+
+            # Depreciation & amortization from either statement if present
+            data.depreciation_and_amortization = (
+                self._get_value(cash_flow, 'depreciation_depletion_and_amortization')
+                or self._get_value(income_statement, 'depreciation_depletion_and_amortization')
+            )
             
             # Add period information
             data.period = result.get('end_date', '')
@@ -783,10 +795,12 @@ class PolygonFinancialAdapter:
     def get_line_item_mappings(self, financial_data: PolygonFinancialData) -> Dict[str, Optional[float]]:
         """Get definitive mapping of LineItemName enum values to actual financial data values."""
         
-        # Calculate the enhanced fields first
-        estimated_capex = self._estimate_capital_expenditure(financial_data)
-        estimated_depreciation = self._estimate_depreciation_and_amortization(financial_data)
-        enhanced_fcf = self._calculate_enhanced_free_cash_flow(financial_data)
+        # Prefer actual reported values; do not derive fallbacks to avoid side effects
+        actual_capex = financial_data.capital_expenditure
+        actual_depreciation = financial_data.depreciation_and_amortization
+        # Use reported free_cash_flow only
+        actual_fcf = financial_data.free_cash_flow if financial_data.free_cash_flow is not None else None
+
         calculated_working_capital = self._calculate_working_capital(financial_data)
         
         return {
@@ -797,7 +811,7 @@ class PolygonFinancialAdapter:
             "operating_income": financial_data.operating_income,
             "gross_profit": financial_data.gross_profit,
             "ebit": financial_data.operating_income,  # EBIT ≈ Operating Income
-            "ebitda": self._calculate_ebitda(financial_data, estimated_depreciation),  # Enhanced calculation
+            "ebitda": self._calculate_ebitda(financial_data, actual_depreciation),
             
             # Balance Sheet - Assets
             "total_assets": financial_data.total_assets,
@@ -837,9 +851,9 @@ class PolygonFinancialAdapter:
             "operating_cash_flow": financial_data.operating_cash_flow,
             "investing_cash_flow": financial_data.investing_cash_flow,
             "financing_cash_flow": financial_data.financing_cash_flow,
-            "free_cash_flow": enhanced_fcf,  # Enhanced calculation
-            "capital_expenditure": estimated_capex,  # Estimated
-            "depreciation_and_amortization": estimated_depreciation,  # Estimated
+            "free_cash_flow": actual_fcf,
+            "capital_expenditure": actual_capex,
+            "depreciation_and_amortization": actual_depreciation,
             "working_capital": calculated_working_capital,  # Calculated
             "dividends_and_other_cash_distributions": None,  # Not available as cash flow item
             "issuance_or_purchase_of_equity_shares": None,  # Not available in response

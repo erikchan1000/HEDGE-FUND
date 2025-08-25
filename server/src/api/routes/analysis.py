@@ -5,6 +5,10 @@ import os
 from datetime import datetime
 import time
 from src.controllers.analysis_controller import AnalysisController
+from src.services.analysis_service import AnalysisService
+from src.ports.email import EmailPort
+from src.external.clients.console_email_adapter import ConsoleEmailAdapter
+from src.external.clients.sendgrid_email_adapter import SendGridEmailAdapter
 from src.utils.cancellation import cancel_request, get_cancellation_manager
 import logging
 
@@ -14,10 +18,91 @@ analysis_bp = Blueprint('analysis', __name__, url_prefix='/api/analysis')
 
 analysis_controller = AnalysisController()
 
+def _init_email_port() -> EmailPort:
+    try:
+        api_key = os.getenv('SENDGRID_API_KEY')
+        from_addr = os.getenv('EMAIL_FROM')
+        if api_key and from_addr:
+            return SendGridEmailAdapter(api_key=api_key, from_address=from_addr)
+    except Exception:
+        pass
+    return ConsoleEmailAdapter()
+
+_email_port: EmailPort = _init_email_port()
+_analysis_service: AnalysisService = AnalysisService()
+
+def set_email_port(email_port: EmailPort) -> None:
+    global _email_port
+    _email_port = email_port
+
+def set_analysis_service(service: AnalysisService) -> None:
+    global _analysis_service
+    _analysis_service = service
+
 @analysis_bp.route('/generate', methods=['POST'])
 def generate_analysis():
     """Generate hedge fund analysis based on provided parameters."""
     return analysis_controller.generate_analysis()
+
+@analysis_bp.route('/email', methods=['POST'])
+def generate_and_email_analysis():
+    """Generate an analysis and email the final result to the provided address.
+
+    Request JSON should include all AnalysisRequestDTO fields plus:
+    - email: destination address
+    """
+    try:
+        body = request.get_json(silent=True)
+        if not body:
+            return jsonify({'error': 'No JSON body provided'}), 400
+
+        email = body.get('email')
+        if not email:
+            return jsonify({'error': 'Missing email field'}), 400
+
+        # Build request DTO
+        req_data = dict(body)
+        req_data.pop('email', None)
+
+        from src.models.dto.requests import AnalysisRequestDTO
+        from src.utils.validators import validate_analysis_request
+
+        errors = validate_analysis_request(req_data)
+        if errors:
+            return jsonify({'errors': errors}), 400
+
+        request_dto = AnalysisRequestDTO.from_dict(req_data)
+
+        # Consume the analysis generator and capture the final result
+        result_payload = None
+        for chunk in _analysis_service.process_analysis_request(request_dto):
+            try:
+                parsed = json.loads(chunk)
+            except Exception:
+                continue
+            if isinstance(parsed, dict) and parsed.get('type') == 'result':
+                result_payload = parsed.get('data')
+
+        if result_payload is None:
+            return jsonify({'error': 'Analysis produced no result'}), 500
+
+        # Prepare email content
+        subject = f"Analysis Result for {', '.join(request_dto.tickers)}"
+        text_body = json.dumps(result_payload, indent=2)
+        html_body = f"<pre>{text_body}</pre>"
+
+        _email_port.send_email(
+            to_address=email,
+            subject=subject,
+            text_body=text_body,
+            html_body=html_body,
+        )
+
+        return jsonify({'message': 'Analysis generated and emailed successfully'}), 200
+
+    except Exception as e:
+        logger.error(f"Error generating and emailing analysis: {str(e)}", exc_info=True)
+        return jsonify({'error': 'Failed to generate and email analysis', 'message': str(e)}), 500
 
 @analysis_bp.route('/cancel/<request_id>', methods=['POST'])
 def cancel_analysis(request_id: str):

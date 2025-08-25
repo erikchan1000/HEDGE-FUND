@@ -30,6 +30,7 @@ alpaca-py = "^0.40.0"
 polygon-api-client = "^1.14.6"
 gunicorn = "^21.2.0"
 asyncio-mqtt = "^0.16.1"
+sendgrid = "^6.11.0"
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^7.4.0"
