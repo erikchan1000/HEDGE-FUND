@@ -85,6 +85,7 @@ async def run(request_data: HedgeFundRequest, request: Request, db: Session = De
                         end_date=request_data.end_date,
                         model_name=request_data.model_name,
                         model_provider=model_provider,
+                        data_provider=request_data.data_provider,
                         request=request_data,  # Pass the full request for agent-specific model access
                     )
                 )

@@ -225,12 +225,13 @@ class BacktestService:
         start_date_dt = end_date_dt - relativedelta(years=1)
         start_date_str = start_date_dt.strftime("%Y-%m-%d")
         api_key = self.request.api_keys.get("FINANCIAL_DATASETS_API_KEY")
+        data_provider = getattr(self.request, "data_provider", "financial_datasets")
 
         for ticker in self.tickers:
-            get_prices(ticker, start_date_str, self.end_date, api_key=api_key)
-            get_financial_metrics(ticker, self.end_date, limit=10, api_key=api_key)
-            get_insider_trades(ticker, self.end_date, start_date=self.start_date, limit=1000, api_key=api_key)
-            get_company_news(ticker, self.end_date, start_date=self.start_date, limit=1000, api_key=api_key)
+            get_prices(ticker, start_date_str, self.end_date, api_key=api_key, data_provider=data_provider)
+            get_financial_metrics(ticker, self.end_date, limit=10, api_key=api_key, data_provider=data_provider)
+            get_insider_trades(ticker, self.end_date, start_date=self.start_date, limit=1000, api_key=api_key, data_provider=data_provider)
+            get_company_news(ticker, self.end_date, start_date=self.start_date, limit=1000, api_key=api_key, data_provider=data_provider)
 
     def _update_performance_metrics(self, performance_metrics: Dict[str, Any]):
         """Update performance metrics using daily returns."""
@@ -331,9 +332,27 @@ class BacktestService:
                 current_prices = {}
                 missing_data = False
 
+                data_provider = getattr(self.request, "data_provider", "financial_datasets")
                 for ticker in self.tickers:
                     try:
-                        price_data = get_price_data(ticker, previous_date_str, current_date_str)
+                        if data_provider == "yfinance":
+                            # Use yfinance path via unified function
+                            prices = get_prices(ticker, previous_date_str, current_date_str, data_provider="yfinance")
+                            price_data = pd.DataFrame([p.model_dump() for p in prices])
+                            if not price_data.empty:
+                                price_data["Date"] = pd.to_datetime(price_data["time"])
+                                price_data.set_index("Date", inplace=True)
+                                price_data.sort_index(inplace=True)
+                                price_data.rename(columns={
+                                    "open": "open",
+                                    "close": "close",
+                                    "high": "high",
+                                    "low": "low",
+                                    "volume": "volume",
+                                }, inplace=True)
+                        else:
+                            # Default Financial Datasets path (existing helper uses that)
+                            price_data = get_price_data(ticker, previous_date_str, current_date_str, api_key=api_key)
                         if price_data.empty:
                             missing_data = True
                             break
@@ -361,7 +380,7 @@ class BacktestService:
 
             # Execute graph-based agent decisions
             try:
-                result = await run_graph_async(
+                    result = await run_graph_async(
                     graph=self.graph,
                     portfolio=portfolio_for_graph,
                     tickers=self.tickers,
@@ -369,6 +388,7 @@ class BacktestService:
                     end_date=current_date_str,
                     model_name=self.model_name,
                     model_provider=self.model_provider,
+                        data_provider=getattr(self.request, "data_provider", "yfinance"),
                     request=self.request,
                 )
                 
