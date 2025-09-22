@@ -8,6 +8,7 @@ from colorama import Fore, Style
 from src.utils.analysts import ANALYST_ORDER
 from src.llm.models import LLM_ORDER, OLLAMA_LLM_ORDER, get_model_info, ModelProvider
 from src.utils.ollama import ensure_ollama_and_model
+from src.data.providers import DATA_SOURCE_ORDER, get_default_data_provider
 
 from dataclasses import dataclass
 from typing import Optional
@@ -208,6 +209,7 @@ class CLIInputs:
     end_date: str
     initial_cash: float
     margin_requirement: float
+    data_provider: str
     show_reasoning: bool = False
     show_agent_graph: bool = False
     raw_args: Optional[argparse.Namespace] = None
@@ -244,6 +246,17 @@ def parse_cli_inputs(
         help="Initial margin requirement ratio for shorts (e.g., 0.5 for 50%%). Defaults to 0.0",
     )
 
+    # Data provider selection
+    valid_data_providers = [name for (_, name, _) in DATA_SOURCE_ORDER]
+    parser.add_argument(
+        "--data-provider",
+        dest="data_provider",
+        type=str,
+        choices=valid_data_providers,
+        default=get_default_data_provider(),
+        help=f"Data provider to use. Choices: {', '.join(valid_data_providers)}. Defaults to {get_default_data_provider()}",
+    )
+
     if include_reasoning_flag:
         parser.add_argument("--show-reasoning", action="store_true", help="Show reasoning from each agent")
     if include_graph_flag:
@@ -269,6 +282,7 @@ def parse_cli_inputs(
         end_date=end_date,
         initial_cash=getattr(args, "initial_cash", 100000.0),
         margin_requirement=getattr(args, "margin_requirement", 0.0),
+        data_provider=getattr(args, "data_provider", get_default_data_provider()),
         show_reasoning=getattr(args, "show_reasoning", False),
         show_agent_graph=getattr(args, "show_agent_graph", False),
         raw_args=args,
