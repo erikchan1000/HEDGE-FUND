@@ -1,5 +1,10 @@
 [
   {
+    "display_name": "Grok 4",
+    "model_name": "grok-4-0709",
+    "provider": "xAI"
+  },
+  {
     "display_name": "GPT-5",
     "model_name": "gpt-5",
     "provider": "OpenAI"
@@ -17,21 +22,6 @@
   {
     "display_name": "GPT-4o",
     "model_name": "gpt-4o",
-    "provider": "OpenAI"
-  },
-  {
-    "display_name": "GPT-4.5",
-    "model_name": "gpt-4.5-preview",
-    "provider": "OpenAI"
-  },
-  {
-    "display_name": "o3",
-    "model_name": "o3",
-    "provider": "OpenAI"
-  },
-  {
-    "display_name": "o4 Mini",
-    "model_name": "o4-mini",
     "provider": "OpenAI"
   },
   {
@@ -70,16 +60,6 @@
     "provider": "Google"
   },
   {
-    "display_name": "Llama 4 Scout (17b)",
-    "model_name": "meta-llama/llama-4-scout-17b-16e-instruct",
-    "provider": "Groq"
-  },
-  {
-    "display_name": "Llama 4 Maverick (17b)",
-    "model_name": "meta-llama/llama-4-maverick-17b-128e-instruct",
-    "provider": "Groq"
-  },
-  {
     "display_name": "GLM-4.5 Air",
     "model_name": "z-ai/glm-4.5-air",
     "provider": "OpenRouter"
@@ -98,5 +78,10 @@
     "display_name": "GigaChat-2-Max",
     "model_name": "GigaChat-2-Max",
     "provider": "GigaChat"
+  },
+  {
+    "display_name": "Azure Open AI Deployment",
+    "model_name": "",
+    "provider": "Azure OpenAI"
   }
 ]

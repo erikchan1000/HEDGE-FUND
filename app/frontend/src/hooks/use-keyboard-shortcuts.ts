@@ -150,6 +150,15 @@ export function useLayoutKeyboardShortcuts(
       callback: openSettings,
       preventDefault: true,
     });
+    
+    // Add settings shortcut if provided
+    shortcuts.push({
+      key: ',',
+      ctrlKey: true, // This will match either Ctrl+, or Cmd+,
+      metaKey: true,
+      callback: openSettings,
+      preventDefault: true,
+    });
   }
 
   useKeyboardShortcuts({ shortcuts });

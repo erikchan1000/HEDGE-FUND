@@ -54,7 +54,7 @@ export default function ComponentItem({
         <Button
           variant="ghost"
           size="icon"
-          className="h-5 w-5 p-0 hover-bg hover:text-primary text-muted-foreground"
+          className="h-5 w-5 hover-bg hover:text-primary text-muted-foreground flex items-center justify-center"
           onClick={handlePlusClick}
           aria-label="Add"
         >

@@ -16,6 +16,7 @@ from src.agents.technicals import technical_analyst_agent
 from src.agents.valuation import valuation_analyst_agent
 from src.agents.warren_buffett import warren_buffett_agent
 from src.agents.rakesh_jhunjhunwala import rakesh_jhunjhunwala_agent
+from src.agents.mohnish_pabrai import mohnish_pabrai_agent
 
 # Define analyst configuration - single source of truth
 ANALYST_CONFIG = {
@@ -66,6 +67,14 @@ ANALYST_CONFIG = {
         "agent_func": michael_burry_agent,
         "type": "analyst",
         "order": 5,
+    },
+    "mohnish_pabrai": {
+        "display_name": "Mohnish Pabrai",
+        "description": "The Dhandho Investor",
+        "investing_style": "Focuses on value investing and long-term growth through fundamental analysis and a margin of safety.",
+        "agent_func": mohnish_pabrai_agent,
+        "type": "analyst",
+        "order": 6,
     },
     "peter_lynch": {
         "display_name": "Peter Lynch",

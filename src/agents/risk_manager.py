@@ -22,6 +22,7 @@ def risk_management_agent(state: AgentState, agent_id: str = "risk_management_ag
     risk_analysis = {}
     current_prices = {}  # Store prices here to avoid redundant API calls
     volatility_data = {}  # Store volatility metrics
+    returns_by_ticker: dict[str, pd.Series] = {}  # For correlation analysis
 
     # First, fetch prices and calculate volatility for all relevant tickers
     all_tickers = set(tickers) | set(portfolio.get("positions", {}).keys())
@@ -56,6 +57,11 @@ def risk_management_agent(state: AgentState, agent_id: str = "risk_management_ag
             # Calculate volatility metrics
             volatility_metrics = calculate_volatility_metrics(prices_df)
             volatility_data[ticker] = volatility_metrics
+
+            # Store returns for correlation analysis (use close-to-close returns)
+            daily_returns = prices_df["close"].pct_change().dropna()
+            if len(daily_returns) > 0:
+                returns_by_ticker[ticker] = daily_returns
             
             progress.update_status(
                 agent_id, 
@@ -72,6 +78,22 @@ def risk_management_agent(state: AgentState, agent_id: str = "risk_management_ag
                 "data_points": len(prices_df) if not prices_df.empty else 0
             }
 
+    # Build returns DataFrame aligned across tickers for correlation analysis
+    correlation_matrix = None
+    if len(returns_by_ticker) >= 2:
+        try:
+            returns_df = pd.DataFrame(returns_by_ticker).dropna(how="any")
+            if returns_df.shape[1] >= 2 and returns_df.shape[0] >= 5:
+                correlation_matrix = returns_df.corr()
+        except Exception:
+            correlation_matrix = None
+
+    # Determine which tickers currently have exposure (non-zero absolute position)
+    active_positions = {
+        t for t, pos in portfolio.get("positions", {}).items()
+        if abs(pos.get("long", 0) - pos.get("short", 0)) > 0
+    }
+
     # Calculate total portfolio value based on current market prices (Net Liquidation Value)
     total_portfolio_value = portfolio.get("cash", 0.0)
     
@@ -84,9 +106,9 @@ def risk_management_agent(state: AgentState, agent_id: str = "risk_management_ag
     
     progress.update_status(agent_id, None, f"Total portfolio value: {total_portfolio_value:.2f}")
 
-    # Calculate volatility-adjusted risk limits for each ticker
+    # Calculate volatility- and correlation-adjusted risk limits for each ticker
     for ticker in tickers:
-        progress.update_status(agent_id, ticker, "Calculating volatility-adjusted position limits")
+        progress.update_status(agent_id, ticker, "Calculating volatility- and correlation-adjusted limits")
         
         if ticker not in current_prices or current_prices[ticker] <= 0:
             progress.update_status(agent_id, ticker, "Failed: No valid price data")
@@ -108,12 +130,44 @@ def risk_management_agent(state: AgentState, agent_id: str = "risk_management_ag
         short_value = position.get("short", 0) * current_price
         current_position_value = abs(long_value - short_value)  # Use absolute exposure
         
-        # Calculate volatility-adjusted position limit
-        vol_adjusted_limit = calculate_volatility_adjusted_limit(
+        # Volatility-adjusted limit pct
+        vol_adjusted_limit_pct = calculate_volatility_adjusted_limit(
             vol_data.get("annualized_volatility", 0.25)
         )
+
+        # Correlation adjustment
+        corr_metrics = {
+            "avg_correlation_with_active": None,
+            "max_correlation_with_active": None,
+            "top_correlated_tickers": [],
+        }
+        corr_multiplier = 1.0
+        if correlation_matrix is not None and ticker in correlation_matrix.columns:
+            # Compute correlations with active positions (exclude self)
+            comparable = [t for t in active_positions if t in correlation_matrix.columns and t != ticker]
+            if not comparable:
+                # If no active positions, compare with all other available tickers
+                comparable = [t for t in correlation_matrix.columns if t != ticker]
+            if comparable:
+                series = correlation_matrix.loc[ticker, comparable]
+                # Drop NaNs just in case
+                series = series.dropna()
+                if len(series) > 0:
+                    avg_corr = float(series.mean())
+                    max_corr = float(series.max())
+                    corr_metrics["avg_correlation_with_active"] = avg_corr
+                    corr_metrics["max_correlation_with_active"] = max_corr
+                    # Top 3 most correlated tickers
+                    top_corr = series.sort_values(ascending=False).head(3)
+                    corr_metrics["top_correlated_tickers"] = [
+                        {"ticker": idx, "correlation": float(val)} for idx, val in top_corr.items()
+                    ]
+                    corr_multiplier = calculate_correlation_multiplier(avg_corr)
         
-        position_limit = total_portfolio_value * vol_adjusted_limit
+        # Combine volatility and correlation adjustments
+        combined_limit_pct = vol_adjusted_limit_pct * corr_multiplier
+        # Convert to dollar position limit
+        position_limit = total_portfolio_value * combined_limit_pct
         
         # Calculate remaining limit for this position
         remaining_position_limit = position_limit - current_position_value
@@ -130,21 +184,24 @@ def risk_management_agent(state: AgentState, agent_id: str = "risk_management_ag
                 "volatility_percentile": float(vol_data.get("volatility_percentile", 100)),
                 "data_points": int(vol_data.get("data_points", 0))
             },
+            "correlation_metrics": corr_metrics,
             "reasoning": {
                 "portfolio_value": float(total_portfolio_value),
                 "current_position_value": float(current_position_value),
-                "base_position_limit_pct": float(vol_adjusted_limit),
+                "base_position_limit_pct": float(vol_adjusted_limit_pct),
+                "correlation_multiplier": float(corr_multiplier),
+                "combined_position_limit_pct": float(combined_limit_pct),
                 "position_limit": float(position_limit),
                 "remaining_limit": float(remaining_position_limit),
                 "available_cash": float(portfolio.get("cash", 0)),
-                "risk_adjustment": f"Volatility-based limit: {vol_adjusted_limit:.1%} (vs 20% baseline)"
+                "risk_adjustment": f"Volatility x Correlation adjusted: {combined_limit_pct:.1%} (base {vol_adjusted_limit_pct:.1%})"
             },
         }
         
         progress.update_status(
             agent_id, 
             ticker, 
-            f"Vol-adjusted limit: {vol_adjusted_limit:.1%}, Available: ${max_position_size:.0f}"
+            f"Adj. limit: {combined_limit_pct:.1%}, Available: ${max_position_size:.0f}"
         )
 
     progress.update_status(agent_id, None, "Done")
@@ -243,3 +300,22 @@ def calculate_volatility_adjusted_limit(annualized_volatility: float) -> float:
     vol_multiplier = max(0.25, min(1.25, vol_multiplier))  # 5% to 25% range
     
     return base_limit * vol_multiplier
+
+
+def calculate_correlation_multiplier(avg_correlation: float) -> float:
+    """Map average correlation to an adjustment multiplier.
+    - Very high correlation (>= 0.8): reduce limit sharply (0.7x)
+    - High correlation (0.6-0.8): reduce (0.85x)
+    - Moderate correlation (0.4-0.6): neutral (1.0x)
+    - Low correlation (0.2-0.4): slight increase (1.05x)
+    - Very low correlation (< 0.2): increase (1.10x)
+    """
+    if avg_correlation >= 0.80:
+        return 0.70
+    if avg_correlation >= 0.60:
+        return 0.85
+    if avg_correlation >= 0.40:
+        return 1.00
+    if avg_correlation >= 0.20:
+        return 1.05
+    return 1.10
